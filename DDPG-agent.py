@@ -3,17 +3,18 @@
 @Author :JohsuaWu1997
 @Date   :01/05/2020
 """
-import pandas as pd
 import numpy as np
-from train_model.DDPG_agent.DDPG import DDPG
-from train_model.DDPG_agent.market import MarketEnv
+import pandas as pd
 import torch
+
+from DDPG import DDPG
+from market import MarketEnv
 
 cuda = torch.device('cuda')
 
-raw_amount = pd.read_csv('../sh000016/i_amount.csv', header=0, index_col=0).values
-raw_buy = pd.read_csv('../sh000016/o_buy.csv', header=0, index_col=0).values
-raw_sell = pd.read_csv('../sh000016/o_sell.csv', header=0, index_col=0).values
+raw_amount = pd.read_csv('./sh000016/i_amount.csv', header=0, index_col=0).values
+raw_buy = pd.read_csv('./sh000016/o_buy.csv', header=0, index_col=0).values
+raw_sell = pd.read_csv('./sh000016/o_sell.csv', header=0, index_col=0).values
 
 START = 10441
 END = 13899
