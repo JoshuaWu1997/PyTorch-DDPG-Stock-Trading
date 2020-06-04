@@ -4,9 +4,10 @@
 @Date   :2020/1/30
 """
 import numpy as np
-from train_model.DDPG_agent.ou_noise import OUNoise
-from train_model.DDPG_agent.actor_critic import Actor, Critic
 import torch
+
+from actor_critic import Actor, Critic
+from ou_noise import OUNoise
 
 cuda = torch.device('cuda')
 torch.backends.cudnn.deterministic = True
