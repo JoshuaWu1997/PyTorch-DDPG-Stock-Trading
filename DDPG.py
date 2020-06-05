@@ -3,15 +3,12 @@
 @Author :JohsuaWu1997
 @Date   :2020/1/30
 """
-import numpy as np
 import torch
 
 from actor_critic import Actor, Critic
 from ou_noise import OUNoise
 
 cuda = torch.device('cuda')
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
 
 GAMMA = 0.9999999993340943687843739933894
 
@@ -35,7 +32,6 @@ class DDPG:
         self.time_dim = time_steps
         self.state_dim = env.observation_space.shape[1]
         self.action_dim = env.action_space.shape[0]
-        print(self.state_dim,self.action_dim,self.time_dim)
         self.batch_size = 64
         self.memory_size = self.time_dim + self.batch_size * 10
         self.start_size = self.time_dim + self.batch_size * 2
@@ -51,18 +47,16 @@ class DDPG:
         self.replay_reward = torch.zeros((self.start_size - 1,), device=cuda)
 
         # Initialize a random process the Ornstein-Uhlenbeck process for action exploration
-        self.exploration_noise = OUNoise(self.action_dim, sigma=0.05 / self.action_dim)
+        self.exploration_noise = OUNoise(self.action_dim, sigma=0.01 / self.action_dim)
         self.initial()
 
     def initial(self):
         self.steps = 0
-        self.action = np.zeros((self.action_dim,))
+        self.action = torch.zeros(self.action_dim, device=cuda)
         self.replay_state = torch.zeros((self.start_size - 1, 3, self.state_dim), device=cuda)
         self.replay_next_state = torch.zeros((self.start_size - 1, 3, self.state_dim), device=cuda)
         self.replay_action = torch.zeros((self.start_size - 1, self.state_dim), device=cuda)
         self.replay_reward = torch.zeros((self.start_size - 1,), device=cuda)
-        torch.manual_seed(self.seed)
-        np.random.seed(self.seed)
 
     def train_on_batch(self):
         # Sample a random minibatch of N transitions from replay buffer
@@ -84,18 +78,14 @@ class DDPG:
         reward_batch = torch.index_select(self.replay_reward, 0, sample)
 
         # Calculate y_batch
-        q_batch = self.critic_network.target_q(
-            self.actor_network.target_action(next_state_batch), next_state_batch
-        )
+        next_action_batch = self.actor_network.target_action(next_state_batch)
+        q_batch = self.critic_network.target_q(next_action_batch, next_state_batch)
         y_batch = torch.add(reward_batch, q_batch, alpha=GAMMA).view(-1, 1)
 
-        # train critic by minimizing the loss L
-        self.critic_network.train(y_batch, action_batch, state_batch)
-
-        # train actor by target loss
+        # train actor-critic by target loss
         self.actor_network.train(
-            self.critic_network.critic_loss(
-                self.actor_network.actor_action(state_batch), state_batch
+            self.critic_network.train(
+                y_batch, action_batch, state_batch
             )
         )
 
@@ -104,14 +94,10 @@ class DDPG:
         self.critic_network.update_target()
 
     def perceive(self, state, action, reward, next_state, done):
-        state_tensor = torch.tensor([state.tolist()], device=cuda)
-        next_state_tensor = torch.tensor([next_state.tolist()], device=cuda)
-        action_tensor = torch.tensor([action.tolist()], device=cuda)
-        reward_tensor = torch.tensor([reward.tolist()], device=cuda)
         if self.steps < self.start_size - 1:
-            self.replay_state[self.steps] = state_tensor
-            self.replay_next_state[self.steps] = next_state_tensor
-            self.replay_action[self.steps] = action_tensor
+            self.replay_state[self.steps] = state
+            self.replay_next_state[self.steps] = next_state
+            self.replay_action[self.steps] = action
             self.replay_reward[self.steps] = reward
         else:
             if self.steps >= self.memory_size:
@@ -119,10 +105,10 @@ class DDPG:
                 self.replay_next_state = self.replay_next_state[1:]
                 self.replay_action = self.replay_action[1:]
                 self.replay_reward = self.replay_reward[1:]
-            self.replay_state = torch.cat((self.replay_state, state_tensor), dim=0)
-            self.replay_next_state = torch.cat((self.replay_next_state, next_state_tensor), dim=0)
-            self.replay_action = torch.cat((self.replay_action, action_tensor), dim=0)
-            self.replay_reward = torch.cat((self.replay_reward, reward_tensor), dim=0)
+            self.replay_state = torch.cat((self.replay_state, state.unsqueeze(0)), dim=0)
+            self.replay_next_state = torch.cat((self.replay_next_state, next_state.unsqueeze(0)), dim=0)
+            self.replay_action = torch.cat((self.replay_action, action.unsqueeze(0)), dim=0)
+            self.replay_reward = torch.cat((self.replay_reward, reward.unsqueeze(0)), dim=0)
         self.steps += 1
 
     def act(self, next_state, portfolio):
@@ -131,11 +117,12 @@ class DDPG:
             next_amount_data = min_max_scale(self.replay_next_state[:, 2, :])[-1].view(1, -1)
             next_state_data = torch.cat([next_state_data, next_amount_data], dim=1)
             self.train_on_batch()
-            allocation = self.actor_network.target_action(next_state_data).cpu().data.numpy().ravel()
+            allocation = self.actor_network.target_action(next_state_data).data.view(-1)
+            allocation += torch.tensor(self.exploration_noise.noise().tolist(), device=cuda)
             allocation[allocation < 0] = 0
             allocation /= sum(allocation)
-            allocation = np.floor(
+            allocation = torch.floor(
                 portfolio * allocation / next_state[1, :] / self.unit
             ) * self.unit
             self.action = allocation
-        return np.array(self.action)
+        return self.action.clone()
